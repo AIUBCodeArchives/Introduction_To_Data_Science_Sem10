@@ -1,0 +1,734 @@
+> # Part 1: Libraries
+> library(httr)
+> library(jsonlite)
+> library(dplyr)
+> library(ggplot2)
+> library(tidyr)
+> library(stringr)
+> library(ranger)
+> # Set working directory to save plots (change this to your preferred folder)
+> setwd("D:/AIUB Notes/Introduction to Data Science/final-project/figures")
+> api_key <- "50ba0606df2aaa50a02b98aff75fe0a5e7916612e66ec2af030b6d345b6d15fe"
+> # Get locations in Bangladesh (country ID = 128)
+> url_loc <- "https://api.openaq.org/v3/locations?limit=100&countries_id=128"
+> res_loc <- GET(url_loc, add_headers("X-API-Key" = api_key))
+> loc_data <- fromJSON(content(res_loc, "text", encoding = "UTF-8"), flatten = TRUE)
+> locations <- loc_data$results
+> cat("\nTotal locations found:", nrow(locations), "\n")
+
+Total locations found: 20 
+> # Step 2: Get all sensor IDs from all locations
+> all_sensors <- list()
+> for (i in 1:nrow(locations)) {
++   loc_id   <- locations$id[i]
++   loc_name <- locations$name[i]
++   
++   url_loc_detail <- paste0("https://api.openaq.org/v3/locations/", loc_id)
++   res_detail     <- GET(url_loc_detail, add_headers("X-API-Key" = api_key))
++   detail_data    <- fromJSON(content(res_detail, "text", encoding = "UTF-8"), flatten = TRUE)
++   
++   if (!is.null(detail_data$results) && nrow(detail_data$results) > 0) {
++     sensors_raw <- detail_data$results$sensors[[1]]
++     
++     date_from <- detail_data$results$datetimeFirst.utc[1]
++     date_to   <- detail_data$results$datetimeLast.utc[1]
++     
++     if (is.null(date_from) || is.na(date_from) || date_from == "") {
++       date_from <- "2015-01-01T00:00:00Z"
++     }
++     if (is.null(date_to) || is.na(date_to) || date_to == "") {
++       date_to <- "2026-01-01T00:00:00Z"
++     }
++     
++     if (!is.null(sensors_raw) && length(sensors_raw) > 0) {
++       sensor_ids <- sensors_raw$id
++       for (sid in sensor_ids) {
++         all_sensors[[length(all_sensors) + 1]] <- data.frame(
++           sensor_id     = sid,
++           location_id   = loc_id,
++           location_name = loc_name,
++           date_from     = as.character(date_from),
++           date_to       = as.character(date_to),
++           stringsAsFactors = FALSE
++         )
++       }
++       cat("Location", i, "-", loc_name, "- sensors:", length(sensor_ids), "\n")
++     } else {
++       cat("Location", i, "-", loc_name, "- no sensors\n")
++     }
++   }
++   Sys.sleep(1)
++ }
+Location 1 - SPARTAN - Dhaka University - sensors: 1 
+Location 2 - US Diplomatic Post: Dhaka - sensors: 1 
+Location 3 - Dhaka - sensors: 2 
+Location 4 - SPARTAN - Dhaka University - sensors: 1 
+Location 5 - Dept. of Public Health and Informatics, Jahangirnagar University - sensors: 6 
+Location 6 - smart air bangladesh office - sensors: 3 
+Location 7 - RAJUK Uttara Apartment Project, Sector - 18, Uttara - sensors: 5 
+Location 8 - Abdullahbag, North Badda - sensors: 5 
+Location 9 - Kalijung,Gazipur  - sensors: 5 
+Location 10 - Kaliganj; Gazipur | Smart Air Bangladesh - sensors: 5 
+Location 11 - Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh - sensors: 5 
+Location 12 - Hazaribagh; Jigatola; Dhaka | Smart Air Bangladesh - sensors: 5 
+Location 13 - Dhanmondi; Road No. 7; Dhaka l Smart Air Bangladesh - sensors: 5 
+Location 14 - Badda; Abdullahbag; Dhaka l Smart Air Bangladesh - sensors: 5 
+Location 15 - Moghbazar; Bhodro Goli; Dhaka | Smart Air Bangladesh - sensors: 5 
+Location 16 - Baridhara; Park Road; Dhaka l Smart Air Bangladesh - sensors: 5 
+Location 17 - Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh - sensors: 5 
+Location 18 - Baridhara Lakeside - sensors: 5 
+Location 19 - Sensor No -01 - sensors: 5 
+Location 20 - Monitor no -5 - sensors: 5 
+> sensors_df <- bind_rows(all_sensors)
+> cat("\nTotal sensors found:", nrow(sensors_df), "\n")
+
+Total sensors found: 84 
+> # Step 3: Collect measurements from each sensor
+> all_rows <- list()
+> for (i in 1:nrow(sensors_df)) {
++   sid       <- sensors_df$sensor_id[i]
++   loc_name  <- sensors_df$location_name[i]
++   date_from <- sensors_df$date_from[i]
++   date_to   <- sensors_df$date_to[i]
++   
++   url_meas <- paste0(
++     "https://api.openaq.org/v3/sensors/", sid, "/measurements",
++     "?datetime_from=", date_from,
++     "&datetime_to=",   date_to,
++     "&limit=100"
++   )
++   
++   res      <- GET(url_meas, add_headers("X-API-Key" = api_key))
++   raw_text <- content(res, "text", encoding = "UTF-8")
++   
++   tryCatch({
++     data <- fromJSON(raw_text, flatten = TRUE)
++     if (!is.null(data$results) && length(data$results) > 0 && nrow(data$results) > 0) {
++       df <- data$results
++       df$sensor_id     <- sid
++       df$location_name <- loc_name
++       df$country       <- "Bangladesh"
++       all_rows[[i]]    <- df
++       cat("Sensor", sid, "-", loc_name, "- rows:", nrow(df), "\n")
++     } else {
++       cat("Sensor", sid, "-", loc_name, "- no data\n")
++     }
++   }, error = function(e) {
++     cat("Sensor", sid, "- ERROR:", conditionMessage(e), "\n")
++   })
++   
++   Sys.sleep(1)
++ }
+Sensor 41 - SPARTAN - Dhaka University - no data
+Sensor 4680 - US Diplomatic Post: Dhaka - rows: 100 
+Sensor 7464180 - Dhaka - rows: 100 
+Sensor 24434 - Dhaka - rows: 100 
+Sensor 6566258 - SPARTAN - Dhaka University - no data
+Sensor 11106526 - Dept. of Public Health and Informatics, Jahangirnagar University - rows: 100 
+Sensor 11106524 - Dept. of Public Health and Informatics, Jahangirnagar University - rows: 100 
+Sensor 11106529 - Dept. of Public Health and Informatics, Jahangirnagar University - rows: 100 
+Sensor 11106525 - Dept. of Public Health and Informatics, Jahangirnagar University - rows: 100 
+Sensor 11106528 - Dept. of Public Health and Informatics, Jahangirnagar University - rows: 100 
+Sensor 11106527 - Dept. of Public Health and Informatics, Jahangirnagar University - rows: 100 
+Sensor 13623704 - smart air bangladesh office - rows: 93 
+Sensor 13623705 - smart air bangladesh office - rows: 93 
+Sensor 13623706 - smart air bangladesh office - rows: 93 
+Sensor 14839068 - RAJUK Uttara Apartment Project, Sector - 18, Uttara - rows: 100 
+Sensor 14839069 - RAJUK Uttara Apartment Project, Sector - 18, Uttara - rows: 100 
+Sensor 14839070 - RAJUK Uttara Apartment Project, Sector - 18, Uttara - rows: 100 
+Sensor 14839071 - RAJUK Uttara Apartment Project, Sector - 18, Uttara - rows: 100 
+Sensor 14839072 - RAJUK Uttara Apartment Project, Sector - 18, Uttara - rows: 100 
+Sensor 15296732 - Abdullahbag, North Badda - rows: 5 
+Sensor 15296733 - Abdullahbag, North Badda - rows: 5 
+Sensor 15296734 - Abdullahbag, North Badda - rows: 5 
+Sensor 15296735 - Abdullahbag, North Badda - rows: 5 
+Sensor 15296736 - Abdullahbag, North Badda - rows: 5 
+Sensor 15297526 - Kalijung,Gazipur  - rows: 12 
+Sensor 15297527 - Kalijung,Gazipur  - rows: 12 
+Sensor 15297528 - Kalijung,Gazipur  - rows: 12 
+Sensor 15297529 - Kalijung,Gazipur  - rows: 12 
+Sensor 15297530 - Kalijung,Gazipur  - rows: 12 
+Sensor 15401492 - Kaliganj; Gazipur | Smart Air Bangladesh - rows: 100 
+Sensor 15401493 - Kaliganj; Gazipur | Smart Air Bangladesh - rows: 100 
+Sensor 15401494 - Kaliganj; Gazipur | Smart Air Bangladesh - rows: 100 
+Sensor 15401495 - Kaliganj; Gazipur | Smart Air Bangladesh - rows: 100 
+Sensor 15401496 - Kaliganj; Gazipur | Smart Air Bangladesh - rows: 100 
+Sensor 15403597 - Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15403598 - Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15403599 - Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15403600 - Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15403601 - Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15420148 - Hazaribagh; Jigatola; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15420149 - Hazaribagh; Jigatola; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15420150 - Hazaribagh; Jigatola; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15420151 - Hazaribagh; Jigatola; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15420152 - Hazaribagh; Jigatola; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15445820 - Dhanmondi; Road No. 7; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15445821 - Dhanmondi; Road No. 7; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15445822 - Dhanmondi; Road No. 7; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15445823 - Dhanmondi; Road No. 7; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15445824 - Dhanmondi; Road No. 7; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15451665 - Badda; Abdullahbag; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15451666 - Badda; Abdullahbag; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15451667 - Badda; Abdullahbag; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15451668 - Badda; Abdullahbag; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15451669 - Badda; Abdullahbag; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15461145 - Moghbazar; Bhodro Goli; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15461146 - Moghbazar; Bhodro Goli; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15461147 - Moghbazar; Bhodro Goli; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15461148 - Moghbazar; Bhodro Goli; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15461149 - Moghbazar; Bhodro Goli; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15462182 - Baridhara; Park Road; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15462183 - Baridhara; Park Road; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15462184 - Baridhara; Park Road; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15462185 - Baridhara; Park Road; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15462186 - Baridhara; Park Road; Dhaka l Smart Air Bangladesh - rows: 100 
+Sensor 15530268 - Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15530269 - Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15530270 - Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15530271 - Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15530272 - Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh - rows: 100 
+Sensor 15677431 - Baridhara Lakeside - rows: 100 
+Sensor 15677432 - Baridhara Lakeside - rows: 100 
+Sensor 15677433 - Baridhara Lakeside - rows: 100 
+Sensor 15677434 - Baridhara Lakeside - rows: 100 
+Sensor 15677435 - Baridhara Lakeside - rows: 100 
+Sensor 15995176 - ERROR: $ operator is invalid for atomic vectors 
+Sensor 15995177 - ERROR: $ operator is invalid for atomic vectors 
+Sensor 15995178 - ERROR: $ operator is invalid for atomic vectors 
+Sensor 15995179 - ERROR: $ operator is invalid for atomic vectors 
+Sensor 15995180 - ERROR: $ operator is invalid for atomic vectors 
+Sensor 16004259 - Monitor no -5 - rows: 6 
+Sensor 16004260 - Monitor no -5 - rows: 6 
+Sensor 16004261 - Monitor no -5 - rows: 6 
+Sensor 16004262 - Monitor no -5 - rows: 6 
+Sensor 16004263 - Monitor no -5 - rows: 6 
+> air_quality_raw <- bind_rows(all_rows)
+> cat("\nTotal rows collected (raw):", nrow(air_quality_raw), "\n")
+
+Total rows collected (raw): 6294 
+> print(names(air_quality_raw))
+ [1] "value"                       "coordinates"                 "summary"                    
+ [4] "flagInfo.hasFlags"           "parameter.id"                "parameter.name"             
+ [7] "parameter.units"             "parameter.displayName"       "period.label"               
+[10] "period.interval"             "period.datetimeFrom.utc"     "period.datetimeFrom.local"  
+[13] "period.datetimeTo.utc"       "period.datetimeTo.local"     "coverage.expectedCount"     
+[16] "coverage.expectedInterval"   "coverage.observedCount"      "coverage.observedInterval"  
+[19] "coverage.percentComplete"    "coverage.percentCoverage"    "coverage.datetimeFrom.utc"  
+[22] "coverage.datetimeFrom.local" "coverage.datetimeTo.utc"     "coverage.datetimeTo.local"  
+[25] "sensor_id"                   "location_name"               "country"                    
+> rows_before <- nrow(air_quality_raw)
+> na_counts    <- sapply(air_quality_raw, function(x) sum(is.na(x)))
+> blank_counts <- sapply(air_quality_raw, function(x) sum(str_trim(ifelse(is.na(x), "", as.character(x))) == ""))
+> missing_audit <- data.frame(
++   Column            = names(na_counts),
++   NA_Count          = as.integer(na_counts),
++   BlankString_Count = as.integer(blank_counts),
++   TotalMissing      = as.integer(na_counts + blank_counts),
++   row.names         = NULL
++ )
+> cat("\n--- Missing Value Audit (NA + Blank Strings) ---\n")
+
+--- Missing Value Audit (NA + Blank Strings) ---
+> print(missing_audit)
+                        Column NA_Count BlankString_Count TotalMissing
+1                        value        0                 0            0
+2                  coordinates     6294              6294        12588
+3                      summary     6294              6294        12588
+4            flagInfo.hasFlags        0                 0            0
+5                 parameter.id        0                 0            0
+6               parameter.name        0                 0            0
+7              parameter.units        0                 0            0
+8        parameter.displayName     6294              6294        12588
+9                 period.label        0                 0            0
+10             period.interval        0                 0            0
+11     period.datetimeFrom.utc        0                 0            0
+12   period.datetimeFrom.local        0                 0            0
+13       period.datetimeTo.utc        0                 0            0
+14     period.datetimeTo.local        0                 0            0
+15      coverage.expectedCount        0                 0            0
+16   coverage.expectedInterval        0                 0            0
+17      coverage.observedCount        0                 0            0
+18   coverage.observedInterval        0                 0            0
+19    coverage.percentComplete        0                 0            0
+20    coverage.percentCoverage        0                 0            0
+21   coverage.datetimeFrom.utc        0                 0            0
+22 coverage.datetimeFrom.local        0                 0            0
+23     coverage.datetimeTo.utc        0                 0            0
+24   coverage.datetimeTo.local        0                 0            0
+25                   sensor_id        0                 0            0
+26               location_name        0                 0            0
+27                     country        0                 0            0
+> clean_air <- air_quality_raw %>%
++   filter(!is.na(value)) %>%
++   filter(!is.na(location_name)) %>%
++   filter(!is.na(parameter.name)) %>%
++   mutate(
++     datetime_clean = as.POSIXct(period.datetimeFrom.utc,
++                                 format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
++     Year      = as.integer(format(datetime_clean, "%Y")),
++     Month     = format(datetime_clean, "%b"),
++     Pollutant = str_to_upper(str_trim(parameter.name)),
++     AQI_Category = case_when(
++       Pollutant == "PM25" & value <= 12.0  ~ "Good",
++       Pollutant == "PM25" & value <= 35.4  ~ "Moderate",
++       Pollutant == "PM25" & value <= 55.4  ~ "Unhealthy for Sensitive Groups",
++       Pollutant == "PM25" & value <= 150.4 ~ "Unhealthy",
++       Pollutant == "PM25" & value >  150.4 ~ "Hazardous",
++       TRUE ~ "Other"
++     )
++   ) %>%
++   filter(!is.na(Year)) %>%
++   distinct() %>%
++   mutate(RowID = row_number()) %>%
++   relocate(RowID)
+> rows_after   <- nrow(clean_air)
+> rows_removed <- rows_before - rows_after
+> cat("\nRows before cleaning:", rows_before)
+
+Rows before cleaning: 6294
+> cat("\nRows after cleaning :", rows_after)
+
+Rows after cleaning : 6294
+> cat("\nRows removed        :", rows_removed, "\n")
+
+Rows removed        : 0 
+> cat("\n--- FIRST 15 ROWS ---\n")
+
+--- FIRST 15 ROWS ---
+> print(head(clean_air, 15))
+   RowID value coordinates summary flagInfo.hasFlags parameter.id parameter.name parameter.units
+1      1    76          NA      NA             FALSE            2           pm25           µg/m³
+2      2    76          NA      NA             FALSE            2           pm25           µg/m³
+3      3    94          NA      NA             FALSE            2           pm25           µg/m³
+4      4   116          NA      NA             FALSE            2           pm25           µg/m³
+5      5   117          NA      NA             FALSE            2           pm25           µg/m³
+6      6   118          NA      NA             FALSE            2           pm25           µg/m³
+7      7   122          NA      NA             FALSE            2           pm25           µg/m³
+8      8   115          NA      NA             FALSE            2           pm25           µg/m³
+9      9   107          NA      NA             FALSE            2           pm25           µg/m³
+10    10    78          NA      NA             FALSE            2           pm25           µg/m³
+11    11    65          NA      NA             FALSE            2           pm25           µg/m³
+12    12    65          NA      NA             FALSE            2           pm25           µg/m³
+13    13    67          NA      NA             FALSE            2           pm25           µg/m³
+14    14    77          NA      NA             FALSE            2           pm25           µg/m³
+15    15   100          NA      NA             FALSE            2           pm25           µg/m³
+   parameter.displayName period.label period.interval period.datetimeFrom.utc period.datetimeFrom.local
+1                     NA          raw        01:00:00    2016-03-10T22:00:00Z 2016-03-11T04:00:00+06:00
+2                     NA          raw        01:00:00    2016-03-10T23:00:00Z 2016-03-11T05:00:00+06:00
+3                     NA          raw        01:00:00    2016-03-11T00:00:00Z 2016-03-11T06:00:00+06:00
+4                     NA          raw        01:00:00    2016-03-11T01:00:00Z 2016-03-11T07:00:00+06:00
+5                     NA          raw        01:00:00    2016-03-11T02:00:00Z 2016-03-11T08:00:00+06:00
+6                     NA          raw        01:00:00    2016-03-11T03:00:00Z 2016-03-11T09:00:00+06:00
+7                     NA          raw        01:00:00    2016-03-11T04:00:00Z 2016-03-11T10:00:00+06:00
+8                     NA          raw        01:00:00    2016-03-11T05:00:00Z 2016-03-11T11:00:00+06:00
+9                     NA          raw        01:00:00    2016-03-11T06:00:00Z 2016-03-11T12:00:00+06:00
+10                    NA          raw        01:00:00    2016-03-11T07:00:00Z 2016-03-11T13:00:00+06:00
+11                    NA          raw        01:00:00    2016-03-11T08:00:00Z 2016-03-11T14:00:00+06:00
+12                    NA          raw        01:00:00    2016-03-11T09:00:00Z 2016-03-11T15:00:00+06:00
+13                    NA          raw        01:00:00    2016-03-11T10:00:00Z 2016-03-11T16:00:00+06:00
+14                    NA          raw        01:00:00    2016-03-11T11:00:00Z 2016-03-11T17:00:00+06:00
+15                    NA          raw        01:00:00    2016-03-11T12:00:00Z 2016-03-11T18:00:00+06:00
+   period.datetimeTo.utc   period.datetimeTo.local coverage.expectedCount coverage.expectedInterval
+1   2016-03-10T23:00:00Z 2016-03-11T05:00:00+06:00                      1                  01:00:00
+2   2016-03-11T00:00:00Z 2016-03-11T06:00:00+06:00                      1                  01:00:00
+3   2016-03-11T01:00:00Z 2016-03-11T07:00:00+06:00                      1                  01:00:00
+4   2016-03-11T02:00:00Z 2016-03-11T08:00:00+06:00                      1                  01:00:00
+5   2016-03-11T03:00:00Z 2016-03-11T09:00:00+06:00                      1                  01:00:00
+6   2016-03-11T04:00:00Z 2016-03-11T10:00:00+06:00                      1                  01:00:00
+7   2016-03-11T05:00:00Z 2016-03-11T11:00:00+06:00                      1                  01:00:00
+8   2016-03-11T06:00:00Z 2016-03-11T12:00:00+06:00                      1                  01:00:00
+9   2016-03-11T07:00:00Z 2016-03-11T13:00:00+06:00                      1                  01:00:00
+10  2016-03-11T08:00:00Z 2016-03-11T14:00:00+06:00                      1                  01:00:00
+11  2016-03-11T09:00:00Z 2016-03-11T15:00:00+06:00                      1                  01:00:00
+12  2016-03-11T10:00:00Z 2016-03-11T16:00:00+06:00                      1                  01:00:00
+13  2016-03-11T11:00:00Z 2016-03-11T17:00:00+06:00                      1                  01:00:00
+14  2016-03-11T12:00:00Z 2016-03-11T18:00:00+06:00                      1                  01:00:00
+15  2016-03-11T13:00:00Z 2016-03-11T19:00:00+06:00                      1                  01:00:00
+   coverage.observedCount coverage.observedInterval coverage.percentComplete coverage.percentCoverage
+1                       1                  01:00:00                      100                      100
+2                       1                  01:00:00                      100                      100
+3                       1                  01:00:00                      100                      100
+4                       1                  01:00:00                      100                      100
+5                       1                  01:00:00                      100                      100
+6                       1                  01:00:00                      100                      100
+7                       1                  01:00:00                      100                      100
+8                       1                  01:00:00                      100                      100
+9                       1                  01:00:00                      100                      100
+10                      1                  01:00:00                      100                      100
+11                      1                  01:00:00                      100                      100
+12                      1                  01:00:00                      100                      100
+13                      1                  01:00:00                      100                      100
+14                      1                  01:00:00                      100                      100
+15                      1                  01:00:00                      100                      100
+   coverage.datetimeFrom.utc coverage.datetimeFrom.local coverage.datetimeTo.utc coverage.datetimeTo.local sensor_id
+1       2016-03-10T22:00:00Z   2016-03-11T04:00:00+06:00    2016-03-10T23:00:00Z 2016-03-11T05:00:00+06:00      4680
+2       2016-03-10T23:00:00Z   2016-03-11T05:00:00+06:00    2016-03-11T00:00:00Z 2016-03-11T06:00:00+06:00      4680
+3       2016-03-11T00:00:00Z   2016-03-11T06:00:00+06:00    2016-03-11T01:00:00Z 2016-03-11T07:00:00+06:00      4680
+4       2016-03-11T01:00:00Z   2016-03-11T07:00:00+06:00    2016-03-11T02:00:00Z 2016-03-11T08:00:00+06:00      4680
+5       2016-03-11T02:00:00Z   2016-03-11T08:00:00+06:00    2016-03-11T03:00:00Z 2016-03-11T09:00:00+06:00      4680
+6       2016-03-11T03:00:00Z   2016-03-11T09:00:00+06:00    2016-03-11T04:00:00Z 2016-03-11T10:00:00+06:00      4680
+7       2016-03-11T04:00:00Z   2016-03-11T10:00:00+06:00    2016-03-11T05:00:00Z 2016-03-11T11:00:00+06:00      4680
+8       2016-03-11T05:00:00Z   2016-03-11T11:00:00+06:00    2016-03-11T06:00:00Z 2016-03-11T12:00:00+06:00      4680
+9       2016-03-11T06:00:00Z   2016-03-11T12:00:00+06:00    2016-03-11T07:00:00Z 2016-03-11T13:00:00+06:00      4680
+10      2016-03-11T07:00:00Z   2016-03-11T13:00:00+06:00    2016-03-11T08:00:00Z 2016-03-11T14:00:00+06:00      4680
+11      2016-03-11T08:00:00Z   2016-03-11T14:00:00+06:00    2016-03-11T09:00:00Z 2016-03-11T15:00:00+06:00      4680
+12      2016-03-11T09:00:00Z   2016-03-11T15:00:00+06:00    2016-03-11T10:00:00Z 2016-03-11T16:00:00+06:00      4680
+13      2016-03-11T10:00:00Z   2016-03-11T16:00:00+06:00    2016-03-11T11:00:00Z 2016-03-11T17:00:00+06:00      4680
+14      2016-03-11T11:00:00Z   2016-03-11T17:00:00+06:00    2016-03-11T12:00:00Z 2016-03-11T18:00:00+06:00      4680
+15      2016-03-11T12:00:00Z   2016-03-11T18:00:00+06:00    2016-03-11T13:00:00Z 2016-03-11T19:00:00+06:00      4680
+               location_name    country      datetime_clean Year Month Pollutant AQI_Category
+1  US Diplomatic Post: Dhaka Bangladesh 2016-03-10 22:00:00 2016   Mar      PM25    Unhealthy
+2  US Diplomatic Post: Dhaka Bangladesh 2016-03-10 23:00:00 2016   Mar      PM25    Unhealthy
+3  US Diplomatic Post: Dhaka Bangladesh 2016-03-11 00:00:00 2016   Mar      PM25    Unhealthy
+4  US Diplomatic Post: Dhaka Bangladesh 2016-03-11 01:00:00 2016   Mar      PM25    Unhealthy
+5  US Diplomatic Post: Dhaka Bangladesh 2016-03-11 02:00:00 2016   Mar      PM25    Unhealthy
+6  US Diplomatic Post: Dhaka Bangladesh 2016-03-11 03:00:00 2016   Mar      PM25    Unhealthy
+7  US Diplomatic Post: Dhaka Bangladesh 2016-03-11 04:00:00 2016   Mar      PM25    Unhealthy
+8  US Diplomatic Post: Dhaka Bangladesh 2016-03-11 05:00:00 2016   Mar      PM25    Unhealthy
+9  US Diplomatic Post: Dhaka Bangladesh 2016-03-11 06:00:00 2016   Mar      PM25    Unhealthy
+10 US Diplomatic Post: Dhaka Bangladesh 2016-03-11 07:00:00 2016   Mar      PM25    Unhealthy
+11 US Diplomatic Post: Dhaka Bangladesh 2016-03-11 08:00:00 2016   Mar      PM25    Unhealthy
+12 US Diplomatic Post: Dhaka Bangladesh 2016-03-11 09:00:00 2016   Mar      PM25    Unhealthy
+13 US Diplomatic Post: Dhaka Bangladesh 2016-03-11 10:00:00 2016   Mar      PM25    Unhealthy
+14 US Diplomatic Post: Dhaka Bangladesh 2016-03-11 11:00:00 2016   Mar      PM25    Unhealthy
+15 US Diplomatic Post: Dhaka Bangladesh 2016-03-11 12:00:00 2016   Mar      PM25    Unhealthy
+> cat("\n--- LAST 15 ROWS ---\n")
+
+--- LAST 15 ROWS ---
+> print(tail(clean_air, 15))
+     RowID  value coordinates summary flagInfo.hasFlags parameter.id   parameter.name parameter.units
+6280  6280   61.0          NA      NA             FALSE           98 relativehumidity               %
+6281  6281   59.0          NA      NA             FALSE           98 relativehumidity               %
+6282  6282   58.0          NA      NA             FALSE           98 relativehumidity               %
+6283  6283   25.2          NA      NA             FALSE          100      temperature               c
+6284  6284   29.3          NA      NA             FALSE          100      temperature               c
+6285  6285   27.4          NA      NA             FALSE          100      temperature               c
+6286  6286   29.9          NA      NA             FALSE          100      temperature               c
+6287  6287   30.2          NA      NA             FALSE          100      temperature               c
+6288  6288   30.4          NA      NA             FALSE          100      temperature               c
+6289  6289 2618.0          NA      NA             FALSE          125            um003   particles/cm³
+6290  6290  902.0          NA      NA             FALSE          125            um003   particles/cm³
+6291  6291  969.0          NA      NA             FALSE          125            um003   particles/cm³
+6292  6292 1388.0          NA      NA             FALSE          125            um003   particles/cm³
+6293  6293 1990.0          NA      NA             FALSE          125            um003   particles/cm³
+6294  6294 2020.0          NA      NA             FALSE          125            um003   particles/cm³
+     parameter.displayName period.label period.interval period.datetimeFrom.utc period.datetimeFrom.local
+6280                    NA          raw        01:00:00    2026-04-21T04:00:00Z 2026-04-21T10:00:00+06:00
+6281                    NA          raw        01:00:00    2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00
+6282                    NA          raw        01:00:00    2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00
+6283                    NA          raw        01:00:00    2026-04-20T10:00:00Z 2026-04-20T16:00:00+06:00
+6284                    NA          raw        01:00:00    2026-04-20T11:00:00Z 2026-04-20T17:00:00+06:00
+6285                    NA          raw        01:00:00    2026-04-21T03:00:00Z 2026-04-21T09:00:00+06:00
+6286                    NA          raw        01:00:00    2026-04-21T04:00:00Z 2026-04-21T10:00:00+06:00
+6287                    NA          raw        01:00:00    2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00
+6288                    NA          raw        01:00:00    2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00
+6289                    NA          raw        01:00:00    2026-04-20T10:00:00Z 2026-04-20T16:00:00+06:00
+6290                    NA          raw        01:00:00    2026-04-20T11:00:00Z 2026-04-20T17:00:00+06:00
+6291                    NA          raw        01:00:00    2026-04-21T03:00:00Z 2026-04-21T09:00:00+06:00
+6292                    NA          raw        01:00:00    2026-04-21T04:00:00Z 2026-04-21T10:00:00+06:00
+6293                    NA          raw        01:00:00    2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00
+6294                    NA          raw        01:00:00    2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00
+     period.datetimeTo.utc   period.datetimeTo.local coverage.expectedCount coverage.expectedInterval
+6280  2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00                      1                  01:00:00
+6281  2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00                      1                  01:00:00
+6282  2026-04-21T07:00:00Z 2026-04-21T13:00:00+06:00                      1                  01:00:00
+6283  2026-04-20T11:00:00Z 2026-04-20T17:00:00+06:00                      1                  01:00:00
+6284  2026-04-20T12:00:00Z 2026-04-20T18:00:00+06:00                      1                  01:00:00
+6285  2026-04-21T04:00:00Z 2026-04-21T10:00:00+06:00                      1                  01:00:00
+6286  2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00                      1                  01:00:00
+6287  2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00                      1                  01:00:00
+6288  2026-04-21T07:00:00Z 2026-04-21T13:00:00+06:00                      1                  01:00:00
+6289  2026-04-20T11:00:00Z 2026-04-20T17:00:00+06:00                      1                  01:00:00
+6290  2026-04-20T12:00:00Z 2026-04-20T18:00:00+06:00                      1                  01:00:00
+6291  2026-04-21T04:00:00Z 2026-04-21T10:00:00+06:00                      1                  01:00:00
+6292  2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00                      1                  01:00:00
+6293  2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00                      1                  01:00:00
+6294  2026-04-21T07:00:00Z 2026-04-21T13:00:00+06:00                      1                  01:00:00
+     coverage.observedCount coverage.observedInterval coverage.percentComplete coverage.percentCoverage
+6280                      1                  01:00:00                      100                      100
+6281                      1                  01:00:00                      100                      100
+6282                      1                  01:00:00                      100                      100
+6283                      1                  01:00:00                      100                      100
+6284                      1                  01:00:00                      100                      100
+6285                      1                  01:00:00                      100                      100
+6286                      1                  01:00:00                      100                      100
+6287                      1                  01:00:00                      100                      100
+6288                      1                  01:00:00                      100                      100
+6289                      1                  01:00:00                      100                      100
+6290                      1                  01:00:00                      100                      100
+6291                      1                  01:00:00                      100                      100
+6292                      1                  01:00:00                      100                      100
+6293                      1                  01:00:00                      100                      100
+6294                      1                  01:00:00                      100                      100
+     coverage.datetimeFrom.utc coverage.datetimeFrom.local coverage.datetimeTo.utc coverage.datetimeTo.local
+6280      2026-04-21T04:00:00Z   2026-04-21T10:00:00+06:00    2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00
+6281      2026-04-21T05:00:00Z   2026-04-21T11:00:00+06:00    2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00
+6282      2026-04-21T06:00:00Z   2026-04-21T12:00:00+06:00    2026-04-21T07:00:00Z 2026-04-21T13:00:00+06:00
+6283      2026-04-20T10:00:00Z   2026-04-20T16:00:00+06:00    2026-04-20T11:00:00Z 2026-04-20T17:00:00+06:00
+6284      2026-04-20T11:00:00Z   2026-04-20T17:00:00+06:00    2026-04-20T12:00:00Z 2026-04-20T18:00:00+06:00
+6285      2026-04-21T03:00:00Z   2026-04-21T09:00:00+06:00    2026-04-21T04:00:00Z 2026-04-21T10:00:00+06:00
+6286      2026-04-21T04:00:00Z   2026-04-21T10:00:00+06:00    2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00
+6287      2026-04-21T05:00:00Z   2026-04-21T11:00:00+06:00    2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00
+6288      2026-04-21T06:00:00Z   2026-04-21T12:00:00+06:00    2026-04-21T07:00:00Z 2026-04-21T13:00:00+06:00
+6289      2026-04-20T10:00:00Z   2026-04-20T16:00:00+06:00    2026-04-20T11:00:00Z 2026-04-20T17:00:00+06:00
+6290      2026-04-20T11:00:00Z   2026-04-20T17:00:00+06:00    2026-04-20T12:00:00Z 2026-04-20T18:00:00+06:00
+6291      2026-04-21T03:00:00Z   2026-04-21T09:00:00+06:00    2026-04-21T04:00:00Z 2026-04-21T10:00:00+06:00
+6292      2026-04-21T04:00:00Z   2026-04-21T10:00:00+06:00    2026-04-21T05:00:00Z 2026-04-21T11:00:00+06:00
+6293      2026-04-21T05:00:00Z   2026-04-21T11:00:00+06:00    2026-04-21T06:00:00Z 2026-04-21T12:00:00+06:00
+6294      2026-04-21T06:00:00Z   2026-04-21T12:00:00+06:00    2026-04-21T07:00:00Z 2026-04-21T13:00:00+06:00
+     sensor_id location_name    country      datetime_clean Year Month        Pollutant AQI_Category
+6280  16004261 Monitor no -5 Bangladesh 2026-04-21 04:00:00 2026   Apr RELATIVEHUMIDITY        Other
+6281  16004261 Monitor no -5 Bangladesh 2026-04-21 05:00:00 2026   Apr RELATIVEHUMIDITY        Other
+6282  16004261 Monitor no -5 Bangladesh 2026-04-21 06:00:00 2026   Apr RELATIVEHUMIDITY        Other
+6283  16004262 Monitor no -5 Bangladesh 2026-04-20 10:00:00 2026   Apr      TEMPERATURE        Other
+6284  16004262 Monitor no -5 Bangladesh 2026-04-20 11:00:00 2026   Apr      TEMPERATURE        Other
+6285  16004262 Monitor no -5 Bangladesh 2026-04-21 03:00:00 2026   Apr      TEMPERATURE        Other
+6286  16004262 Monitor no -5 Bangladesh 2026-04-21 04:00:00 2026   Apr      TEMPERATURE        Other
+6287  16004262 Monitor no -5 Bangladesh 2026-04-21 05:00:00 2026   Apr      TEMPERATURE        Other
+6288  16004262 Monitor no -5 Bangladesh 2026-04-21 06:00:00 2026   Apr      TEMPERATURE        Other
+6289  16004263 Monitor no -5 Bangladesh 2026-04-20 10:00:00 2026   Apr            UM003        Other
+6290  16004263 Monitor no -5 Bangladesh 2026-04-20 11:00:00 2026   Apr            UM003        Other
+6291  16004263 Monitor no -5 Bangladesh 2026-04-21 03:00:00 2026   Apr            UM003        Other
+6292  16004263 Monitor no -5 Bangladesh 2026-04-21 04:00:00 2026   Apr            UM003        Other
+6293  16004263 Monitor no -5 Bangladesh 2026-04-21 05:00:00 2026   Apr            UM003        Other
+6294  16004263 Monitor no -5 Bangladesh 2026-04-21 06:00:00 2026   Apr            UM003        Other
+> set.seed(42)
+> cat("\n--- RANDOM 15 ROWS ---\n")
+
+--- RANDOM 15 ROWS ---
+> print(sample_n(clean_air, min(15, nrow(clean_air))))
+   RowID       value coordinates summary flagInfo.hasFlags parameter.id   parameter.name parameter.units
+1   2609    29.28483          NA      NA             FALSE          100      temperature               c
+2   4069    26.29767          NA      NA             FALSE          100      temperature               c
+3   2369   221.47800          NA      NA             FALSE            2             pm25           µg/m³
+4   5273   104.00000          NA      NA             FALSE           19              pm1           µg/m³
+5   1098   821.93751          NA      NA             FALSE          125            um003   particles/cm³
+6   1252    38.27200          NA      NA             FALSE           19              pm1           µg/m³
+7    634    69.52500          NA      NA             FALSE           98 relativehumidity               %
+8   2097    21.73550          NA      NA             FALSE          100      temperature               c
+9   5248 10271.03333          NA      NA             FALSE          125            um003   particles/cm³
+10  5423    97.80000          NA      NA             FALSE            2             pm25           µg/m³
+11  6168  3037.00000          NA      NA             FALSE          125            um003   particles/cm³
+12  3911    83.70850          NA      NA             FALSE            2             pm25           µg/m³
+13   356   103.60000          NA      NA             FALSE           19              pm1           µg/m³
+14  5721  4402.00000          NA      NA             FALSE          125            um003   particles/cm³
+15  4261  7719.90817          NA      NA             FALSE          125            um003   particles/cm³
+   parameter.displayName period.label period.interval period.datetimeFrom.utc period.datetimeFrom.local
+1                     NA          raw        01:00:00    2026-02-11T07:00:00Z 2026-02-11T13:00:00+06:00
+2                     NA          raw        01:00:00    2026-02-16T17:00:00Z 2026-02-16T23:00:00+06:00
+3                     NA          raw        01:00:00    2026-02-09T15:00:00Z 2026-02-09T21:00:00+06:00
+4                     NA          raw        01:00:00    2026-02-25T02:00:00Z 2026-02-25T08:00:00+06:00
+5                     NA          raw        01:00:00    2025-07-20T09:00:00Z 2025-07-20T15:00:00+06:00
+6                     NA          raw        01:00:00    2025-12-12T11:00:00Z 2025-12-12T17:00:00+06:00
+7                     NA          raw        01:00:00    2024-10-29T17:00:00Z 2024-10-29T23:00:00+06:00
+8                     NA          raw        01:00:00    2026-02-10T22:00:00Z 2026-02-11T04:00:00+06:00
+9                     NA          raw        01:00:00    2026-02-20T03:00:00Z 2026-02-20T09:00:00+06:00
+10                    NA          raw        01:00:00    2026-03-01T02:00:00Z 2026-03-01T08:00:00+06:00
+11                    NA          raw        01:00:00    2026-03-14T07:00:00Z 2026-03-14T13:00:00+06:00
+12                    NA          raw        01:00:00    2026-02-19T08:00:00Z 2026-02-19T14:00:00+06:00
+13                    NA          raw        01:00:00    2024-10-30T16:00:00Z 2024-10-30T22:00:00+06:00
+14                    NA          raw        01:00:00    2026-03-01T00:00:00Z 2026-03-01T06:00:00+06:00
+15                    NA          raw        01:00:00    2026-02-21T12:00:00Z 2026-02-21T18:00:00+06:00
+   period.datetimeTo.utc   period.datetimeTo.local coverage.expectedCount coverage.expectedInterval
+1   2026-02-11T08:00:00Z 2026-02-11T14:00:00+06:00                      1                  01:00:00
+2   2026-02-16T18:00:00Z 2026-02-17T00:00:00+06:00                      1                  01:00:00
+3   2026-02-09T16:00:00Z 2026-02-09T22:00:00+06:00                      1                  01:00:00
+4   2026-02-25T03:00:00Z 2026-02-25T09:00:00+06:00                      1                  01:00:00
+5   2025-07-20T10:00:00Z 2025-07-20T16:00:00+06:00                      1                  01:00:00
+6   2025-12-12T12:00:00Z 2025-12-12T18:00:00+06:00                      1                  01:00:00
+7   2024-10-29T18:00:00Z 2024-10-30T00:00:00+06:00                      1                  01:00:00
+8   2026-02-10T23:00:00Z 2026-02-11T05:00:00+06:00                      1                  01:00:00
+9   2026-02-20T04:00:00Z 2026-02-20T10:00:00+06:00                      1                  01:00:00
+10  2026-03-01T03:00:00Z 2026-03-01T09:00:00+06:00                      1                  01:00:00
+11  2026-03-14T08:00:00Z 2026-03-14T14:00:00+06:00                      1                  01:00:00
+12  2026-02-19T09:00:00Z 2026-02-19T15:00:00+06:00                      1                  01:00:00
+13  2024-10-30T17:00:00Z 2024-10-30T23:00:00+06:00                      1                  01:00:00
+14  2026-03-01T01:00:00Z 2026-03-01T07:00:00+06:00                      1                  01:00:00
+15  2026-02-21T13:00:00Z 2026-02-21T19:00:00+06:00                      1                  01:00:00
+   coverage.observedCount coverage.observedInterval coverage.percentComplete coverage.percentCoverage
+1                       1                  01:00:00                      100                      100
+2                       1                  01:00:00                      100                      100
+3                       1                  01:00:00                      100                      100
+4                       1                  01:00:00                      100                      100
+5                       1                  01:00:00                      100                      100
+6                       1                  01:00:00                      100                      100
+7                       1                  01:00:00                      100                      100
+8                       1                  01:00:00                      100                      100
+9                       1                  01:00:00                      100                      100
+10                      1                  01:00:00                      100                      100
+11                      1                  01:00:00                      100                      100
+12                      1                  01:00:00                      100                      100
+13                      1                  01:00:00                      100                      100
+14                      1                  01:00:00                      100                      100
+15                      1                  01:00:00                      100                      100
+   coverage.datetimeFrom.utc coverage.datetimeFrom.local coverage.datetimeTo.utc coverage.datetimeTo.local sensor_id
+1       2026-02-11T07:00:00Z   2026-02-11T13:00:00+06:00    2026-02-11T08:00:00Z 2026-02-11T14:00:00+06:00  15403600
+2       2026-02-16T17:00:00Z   2026-02-16T23:00:00+06:00    2026-02-16T18:00:00Z 2026-02-17T00:00:00+06:00  15451668
+3       2026-02-09T15:00:00Z   2026-02-09T21:00:00+06:00    2026-02-09T16:00:00Z 2026-02-09T22:00:00+06:00  15403598
+4       2026-02-25T02:00:00Z   2026-02-25T08:00:00+06:00    2026-02-25T03:00:00Z 2026-02-25T09:00:00+06:00  15530268
+5       2025-07-20T09:00:00Z   2025-07-20T15:00:00+06:00    2025-07-20T10:00:00Z 2025-07-20T16:00:00+06:00  13623706
+6       2025-12-12T11:00:00Z   2025-12-12T17:00:00+06:00    2025-12-12T12:00:00Z 2025-12-12T18:00:00+06:00  14839068
+7       2024-10-29T17:00:00Z   2024-10-29T23:00:00+06:00    2024-10-29T18:00:00Z 2024-10-30T00:00:00+06:00  11106525
+8       2026-02-10T22:00:00Z   2026-02-11T04:00:00+06:00    2026-02-10T23:00:00Z 2026-02-11T05:00:00+06:00  15401495
+9       2026-02-20T03:00:00Z   2026-02-20T09:00:00+06:00    2026-02-20T04:00:00Z 2026-02-20T10:00:00+06:00  15462186
+10      2026-03-01T02:00:00Z   2026-03-01T08:00:00+06:00    2026-03-01T03:00:00Z 2026-03-01T09:00:00+06:00  15530269
+11      2026-03-14T07:00:00Z   2026-03-14T13:00:00+06:00    2026-03-14T08:00:00Z 2026-03-14T14:00:00+06:00  15677435
+12      2026-02-19T08:00:00Z   2026-02-19T14:00:00+06:00    2026-02-19T09:00:00Z 2026-02-19T15:00:00+06:00  15451666
+13      2024-10-30T16:00:00Z   2024-10-30T22:00:00+06:00    2024-10-30T17:00:00Z 2024-10-30T23:00:00+06:00  11106526
+14      2026-03-01T00:00:00Z   2026-03-01T06:00:00+06:00    2026-03-01T01:00:00Z 2026-03-01T07:00:00+06:00  15530272
+15      2026-02-21T12:00:00Z   2026-02-21T18:00:00+06:00    2026-02-21T13:00:00Z 2026-02-21T19:00:00+06:00  15451669
+                                                      location_name    country      datetime_clean Year Month
+1           Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh Bangladesh 2026-02-11 07:00:00 2026   Feb
+2                  Badda; Abdullahbag; Dhaka l Smart Air Bangladesh Bangladesh 2026-02-16 17:00:00 2026   Feb
+3           Gulshan Society Lake Park; Dhaka | Smart Air Bangladesh Bangladesh 2026-02-09 15:00:00 2026   Feb
+4                  Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh Bangladesh 2026-02-25 02:00:00 2026   Feb
+5                                       smart air bangladesh office Bangladesh 2025-07-20 09:00:00 2025   Jul
+6               RAJUK Uttara Apartment Project, Sector - 18, Uttara Bangladesh 2025-12-12 11:00:00 2025   Dec
+7  Dept. of Public Health and Informatics, Jahangirnagar University Bangladesh 2024-10-29 17:00:00 2024   Oct
+8                          Kaliganj; Gazipur | Smart Air Bangladesh Bangladesh 2026-02-10 22:00:00 2026   Feb
+9                Baridhara; Park Road; Dhaka l Smart Air Bangladesh Bangladesh 2026-02-20 03:00:00 2026   Feb
+10                 Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh Bangladesh 2026-03-01 02:00:00 2026   Mar
+11                                               Baridhara Lakeside Bangladesh 2026-03-14 07:00:00 2026   Mar
+12                 Badda; Abdullahbag; Dhaka l Smart Air Bangladesh Bangladesh 2026-02-19 08:00:00 2026   Feb
+13 Dept. of Public Health and Informatics, Jahangirnagar University Bangladesh 2024-10-30 16:00:00 2024   Oct
+14                 Mirpur; Shewrapara; Dhaka | Smart Air Bangladesh Bangladesh 2026-03-01 00:00:00 2026   Mar
+15                 Badda; Abdullahbag; Dhaka l Smart Air Bangladesh Bangladesh 2026-02-21 12:00:00 2026   Feb
+          Pollutant AQI_Category
+1       TEMPERATURE        Other
+2       TEMPERATURE        Other
+3              PM25    Hazardous
+4               PM1        Other
+5             UM003        Other
+6               PM1        Other
+7  RELATIVEHUMIDITY        Other
+8       TEMPERATURE        Other
+9             UM003        Other
+10             PM25    Unhealthy
+11            UM003        Other
+12             PM25    Unhealthy
+13              PM1        Other
+14            UM003        Other
+15            UM003        Other
+> top_pollutants <- clean_air %>%
++   count(Pollutant, sort = TRUE) %>%
++   slice_head(n = 10)
+> p1 <- ggplot(top_pollutants, aes(x = reorder(Pollutant, n), y = n)) +
++   geom_col(fill = "tomato") +
++   geom_text(aes(label = n), hjust = -0.1, size = 4) +
++   coord_flip() +
++   expand_limits(y = max(top_pollutants$n) * 1.15) +
++   labs(title = "Top 10 Pollutants by Measurement Count",
++        x = "Pollutant", y = "Count")
+> print(p1)
+> ggsave("plot1_pollutant_distribution.png", plot = p1, width = 10, height = 6, dpi = 300)
+> yearly_all <- clean_air %>%
++   count(Year, name = "MeasurementCount") %>%
++   arrange(Year)
+> p2 <- ggplot(yearly_all, aes(x = MeasurementCount)) +
++   geom_histogram(bins = 20, fill = "steelblue", color = "white") +
++   labs(title = "Histogram: Distribution of Yearly Measurement Counts",
++        x = "Measurement Count per Year", y = "Number of Years")
+> print(p2)
+> ggsave("plot2_yearly_histogram.png", plot = p2, width = 10, height = 6, dpi = 300)
+> p3 <- ggplot(yearly_all, aes(x = Year, y = MeasurementCount)) +
++   geom_point(color = "darkorange", size = 2, alpha = 0.8) +
++   geom_smooth(method = "lm", se = FALSE, color = "black") +
++   scale_y_log10() +
++   labs(title = "Scatter Plot: Year vs Measurement Count (Log Y)",
++        x = "Year", y = "Measurement Count (log scale)")
+> print(p3)
+`geom_smooth()` using formula = 'y ~ x'
+> ggsave("plot3_trend_over_time.png", plot = p3, width = 10, height = 6, dpi = 300)
+`geom_smooth()` using formula = 'y ~ x'
+> top_locations <- clean_air %>%
++   count(location_name, sort = TRUE) %>%
++   slice_head(n = 15)
+> p4 <- ggplot(top_locations, aes(x = reorder(location_name, n), y = n)) +
++   geom_col(fill = "seagreen") +
++   geom_text(aes(label = n), hjust = -0.1, size = 4) +
++   coord_flip() +
++   expand_limits(y = max(top_locations$n) * 1.15) +
++   labs(title = "Top 15 Locations by Measurement Count",
++        x = "Location", y = "Count")
+> print(p4)
+> ggsave("plot4_location_distribution.png", plot = p4, width = 12, height = 7, dpi = 300)
+> top10_pollutants <- clean_air %>%
++   count(Pollutant, sort = TRUE) %>%
++   slice_head(n = 10) %>%
++   pull(Pollutant)
+> top10_locations <- clean_air %>%
++   count(location_name, sort = TRUE) %>%
++   slice_head(n = 10) %>%
++   pull(location_name)
+> heatmap_data <- clean_air %>%
++   filter(Pollutant %in% top10_pollutants, location_name %in% top10_locations) %>%
++   count(location_name, Pollutant, name = "n")
+> p5 <- ggplot(heatmap_data, aes(x = Pollutant, y = location_name, fill = n)) +
++   geom_tile(color = "white") +
++   labs(title = "Heatmap: Location x Pollutant",
++        x = "Pollutant", y = "Location") +
++   theme(axis.text.x = element_text(angle = 30, hjust = 1))
+> print(p5)
+> ggsave("plot5_heatmap.png", plot = p5, width = 12, height = 7, dpi = 300)
+> clf_data <- clean_air %>%
++   filter(Pollutant == "PM25") %>%
++   filter(AQI_Category != "Other") %>%
++   mutate(
++     AQI_Category  = factor(AQI_Category),
++     location_name = factor(location_name),
++     Month         = factor(Month)
++   ) %>%
++   select(AQI_Category, location_name, Month, Year)
+> cat("\nClass distribution:\n")
+
+Class distribution:
+> print(table(clf_data$AQI_Category))
+
+                          Good                      Hazardous                       Moderate 
+                            82                            581                             15 
+                     Unhealthy Unhealthy for Sensitive Groups 
+                           633                            105 
+> set.seed(42)
+> train_idx <- sample(seq_len(nrow(clf_data)), size = 0.8 * nrow(clf_data))
+> train_df  <- clf_data[train_idx, ]
+> test_df   <- clf_data[-train_idx, ]
+> set.seed(42)
+> rf_model <- ranger(
++   formula     = AQI_Category ~ location_name + Month + Year,
++   data        = train_df,
++   num.trees   = 500,
++   importance  = "impurity",
++   probability = TRUE
++ )
+> pred_prob  <- predict(rf_model, data = test_df)$predictions
+> pred_class <- colnames(pred_prob)[max.col(pred_prob)]
+> pred_class <- factor(pred_class, levels = levels(test_df$AQI_Category))
+> accuracy <- mean(pred_class == test_df$AQI_Category)
+> cat("\nRanger Random Forest Accuracy:", round(accuracy, 4), "\n")
+
+Ranger Random Forest Accuracy: 0.6796 
+> cat("\nConfusion Matrix:\n")
+
+Confusion Matrix:
+> print(table(Predicted = pred_class, Actual = test_df$AQI_Category))
+                                Actual
+Predicted                        Good Hazardous Moderate Unhealthy Unhealthy for Sensitive Groups
+  Good                             22         0        4         0                              1
+  Hazardous                         0        96        0        57                              1
+  Moderate                          0         0        0         0                              0
+  Unhealthy                         0        19        0        65                              2
+  Unhealthy for Sensitive Groups    0         0        1         6                             10
+> # Feature Importance
+> imp    <- sort(rf_model$variable.importance, decreasing = TRUE)
+> imp_df <- data.frame(Feature = names(imp), Importance = as.numeric(imp))
+> p6 <- ggplot(imp_df, aes(x = reorder(Feature, Importance), y = Importance)) +
++   geom_col(fill = "purple") +
++   coord_flip() +
++   labs(title = "Feature Importance (Random Forest - ranger)",
++        x = "Feature", y = "Importance")
+> print(p6)
+> ggsave("plot6_feature_importance.png", plot = p6, width = 10, height = 6, dpi = 300)
+> cat("\nAll plots saved successfully.\n")
+
+All plots saved successfully.
